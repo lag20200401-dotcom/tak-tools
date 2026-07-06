@@ -40,6 +40,13 @@
   .tpl button{background:#e8f5ee;border:1px solid var(--green);color:var(--green);border-radius:20px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit;}
   .tpl button:hover{background:var(--green);color:#fff;}
   .gen{opacity:.6;pointer-events:none;}
+  .table-wrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{background:var(--green-light);color:var(--green);padding:7px 9px;text-align:left;font-weight:700;white-space:nowrap;}
+  td{padding:7px 9px;border-bottom:1px solid #eee;vertical-align:middle;}
+  .empty{text-align:center;padding:24px;color:var(--text-sub);}
+  .btn-sm{padding:5px 10px;font-size:12px;}
+  .badge-blue{display:inline-block;background:#e3f2fd;color:#1565c0;border-radius:6px;padding:2px 8px;font-size:11px;}
 </style>
 </head>
 <body>
@@ -51,7 +58,7 @@
 <div class="tabs">
   <button class="tab active" onclick="showPanel('ba',this)">📸 ビフォーアフター</button>
   <button class="tab" onclick="showPanel('line',this)">💬 LINE生成</button>
-  <button class="tab" disabled title="準備中">📋 問診票（準備中）</button>
+  <button class="tab" onclick="showPanel('monshin',this)">📋 問診票</button>
 </div>
 
 <main>
@@ -229,6 +236,31 @@
     </div>
   </div>
 </div>
+
+<!-- ════════ 問診票 ════════ -->
+<div id="panel-monshin" class="panel">
+  <div class="card">
+    <div class="card-title">📋 問診票（未取込一覧）</div>
+    <div class="btn-row" style="margin-top:0;margin-bottom:10px;">
+      <button class="btn btn-primary btn-sm" onclick="loadMonshinList()">🔄 最新データを取得</button>
+    </div>
+    <div id="monshin-status" style="font-size:13px;color:var(--text-sub);margin-bottom:8px;"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>受信日時</th><th>氏名</th><th>電話番号</th><th>症状</th><th>いつから</th><th>操作</th></tr></thead>
+        <tbody id="monshin-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="monshin-detail-card" class="card" style="display:none;">
+    <div class="card-title">📄 問診票詳細</div>
+    <div id="monshin-detail-body"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="markMonshinDone()">✅ 取込済みにする（名前を記憶）</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('monshin-detail-card').style.display='none'">閉じる</button>
+    </div>
+  </div>
+</div>
 </main>
 
 <script>
@@ -243,6 +275,7 @@ function showPanel(id,el){
   if(el)el.classList.add('active');
   if(id==='ba'){ baShowDesign(baCurDesign); baLoadNameSuggest(); }
   if(id==='line'){ baLoadNameSuggest(); }
+  if(id==='monshin'){ loadMonshinList(); }
 }
 
 // ───────── 顧客名サジェスト（手入力＋記憶） ─────────
@@ -457,7 +490,7 @@ async function baSaveToDrive(){
   }
 }
 
-// ───────── LINE生成（V10より移植・GASは既存URL） ─────────
+// ───────── LINE生成（GASは既存URL） ─────────
 var LINE_GAS_URL='https://script.google.com/macros/s/AKfycbxqsyCHPCjzNRNnmTP64xUIdxn9The5U6hX2kXv4CFGzt5704AX_v20TazKNummEWQ3XQ/exec';
 function lineTpl(hint){document.getElementById('line-extra').value=hint;}
 function lineClear(){document.getElementById('line-customer').value='';document.getElementById('line-purpose').value='followup';document.getElementById('line-last-menu').value='';document.getElementById('line-tone').value='warm';document.getElementById('line-extra').value='';document.getElementById('line-result-card').style.display='none';}
@@ -497,6 +530,64 @@ async function generateLineMessage(){
   }finally{
     btn.textContent='✨ AIでメッセージ生成';btn.classList.remove('gen');
   }
+}
+
+// ───────── 問診票（GASは既存URL／取込＝マーク＋名前記憶） ─────────
+var MONSHIN_GAS='https://script.google.com/macros/s/AKfycbyPXyFn9Wuh5taEbEJWtjp0LI5u7Ke4sYYT7vtgnpC-X0fbee59u8qttA5w_qK7xGdD6g/exec';
+var monshinList=[];
+var selectedMonshin=null;
+function mEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+async function loadMonshinList(){
+  var status=document.getElementById('monshin-status');
+  var tbody=document.getElementById('monshin-tbody');
+  status.textContent='⏳ 取得中...';tbody.innerHTML='';
+  try{
+    var res=await fetch(MONSHIN_GAS+'?type=list&t='+Date.now());
+    monshinList=await res.json();
+    if(!monshinList||!monshinList.length){
+      status.textContent='未取込の問診票はありません';
+      tbody.innerHTML='<tr><td colspan="6" class="empty">データなし</td></tr>';
+      return;
+    }
+    status.textContent='未取込: '+monshinList.length+'件';
+    tbody.innerHTML=monshinList.map(function(m,i){
+      return '<tr><td style="font-size:12px">'+mEsc(m['受信日時']||'-')+'</td>'
+        +'<td><strong>'+mEsc(m['氏名']||'-')+'</strong></td>'
+        +'<td>'+mEsc(m['電話番号']||'-')+'</td>'
+        +'<td style="font-size:12px">'+mEsc((m['症状']||'-').slice(0,20))+'</td>'
+        +'<td style="font-size:12px">'+mEsc(m['いつから']||'-')+'</td>'
+        +'<td><button class="btn btn-secondary btn-sm" onclick="showMonshinDetail('+i+')">詳細</button></td></tr>';
+    }).join('');
+  }catch(e){
+    status.textContent='取得エラー: '+e.message;
+  }
+}
+function showMonshinDetail(i){
+  selectedMonshin=Object.assign({},monshinList[i],{_listIndex:i});
+  var m=selectedMonshin;
+  var rows=[['①症状',m['症状']],['②いつから',m['いつから']],['③日常への影響',m['日常への影響']],['⑥本日の期待',m['本日の期待']],['メモ',m['メモ']]];
+  document.getElementById('monshin-detail-body').innerHTML=
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">'
+    +'<div><label style="display:block;margin-bottom:4px;">氏名</label><div style="padding:8px;background:#f5f5f5;border-radius:6px;">'+mEsc(m['氏名']||'-')+'</div></div>'
+    +'<div><label style="display:block;margin-bottom:4px;">電話番号</label><div style="padding:8px;background:#f5f5f5;border-radius:6px;">'+mEsc(m['電話番号']||'-')+'</div></div></div>'
+    +'<table style="width:100%;font-size:13px;border-collapse:collapse;">'
+    +rows.map(function(r){return '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px 8px;color:var(--text-sub);width:130px;font-weight:600;">'+r[0]+'</td><td style="padding:6px 8px;">'+mEsc(r[1]||'-')+'</td></tr>';}).join('')
+    +'</table>';
+  var card=document.getElementById('monshin-detail-card');
+  card.style.display='block';
+  card.scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function markMonshinDone(){
+  if(!selectedMonshin)return;
+  var m=selectedMonshin;
+  var name=(m['氏名']||'').trim();
+  if(name) baRememberName(name);
+  try{ await fetch(MONSHIN_GAS+'?type=markDone&row='+m._rowIndex+'&t='+Date.now()); }catch(e){}
+  if(m._listIndex!=null) monshinList.splice(m._listIndex,1);
+  selectedMonshin=null;
+  document.getElementById('monshin-detail-card').style.display='none';
+  loadMonshinList();
+  alert((name||'この問診票')+' を取込済みにしました'+(name?'（名前を候補に記憶）':''));
 }
 
 // ───────── 初期化 ─────────
